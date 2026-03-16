@@ -22,12 +22,15 @@ export default function SettingsPage() {
         <div className="bg-card border border-border rounded-lg p-4 space-y-4">
           <div>
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5 block">Provider</label>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <div className="px-3 py-2 rounded-md bg-secondary text-sm text-foreground border border-primary/30">
-                xAI (Grok)
+                Groq (Llama 3.3 70B)
               </div>
               <div className="px-3 py-2 rounded-md bg-secondary text-sm text-muted-foreground border border-border opacity-50">
-                Anthropic (Claude) — Coming Soon
+                xAI (Grok) — Swap Ready
+              </div>
+              <div className="px-3 py-2 rounded-md bg-secondary text-sm text-muted-foreground border border-border opacity-50">
+                Anthropic (Claude) — Swap Ready
               </div>
             </div>
           </div>
