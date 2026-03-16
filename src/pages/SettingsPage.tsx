@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Settings, Key, GitBranch, Database, Info } from "lucide-react";
+import { Settings, Key, GitBranch, Info } from "lucide-react";
 
 export default function SettingsPage() {
   const [model, setModel] = useState("llama-3.3-70b-versatile");
@@ -11,27 +11,18 @@ export default function SettingsPage() {
           <Settings className="h-5 w-5 text-primary" />
           Configuration
         </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          System settings and integrations
-        </p>
+        <p className="text-sm text-muted-foreground mt-1">System settings and integrations</p>
       </div>
 
-      {/* LLM Configuration */}
       <section className="space-y-4">
         <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-widest">LLM Engine</h2>
         <div className="bg-card border border-border rounded-lg p-4 space-y-4">
           <div>
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5 block">Provider</label>
             <div className="flex items-center gap-3 flex-wrap">
-              <div className="px-3 py-2 rounded-md bg-secondary text-sm text-foreground border border-primary/30">
-                Groq (Llama 3.3 70B)
-              </div>
-              <div className="px-3 py-2 rounded-md bg-secondary text-sm text-muted-foreground border border-border opacity-50">
-                xAI (Grok) — Swap Ready
-              </div>
-              <div className="px-3 py-2 rounded-md bg-secondary text-sm text-muted-foreground border border-border opacity-50">
-                Anthropic (Claude) — Swap Ready
-              </div>
+              <div className="px-3 py-2 rounded-md bg-secondary text-sm text-foreground border border-primary/30">Groq (Llama 3.3 70B)</div>
+              <div className="px-3 py-2 rounded-md bg-secondary text-sm text-muted-foreground border border-border opacity-50">xAI (Grok) — Swap Ready</div>
+              <div className="px-3 py-2 rounded-md bg-secondary text-sm text-muted-foreground border border-border opacity-50">Anthropic (Claude) — Swap Ready</div>
             </div>
           </div>
           <div>
@@ -45,17 +36,15 @@ export default function SettingsPage() {
               <option value="llama-3.1-8b-instant">llama-3.1-8b-instant (Fast)</option>
             </select>
           </div>
-          </div>
           <div className="flex items-start gap-2 p-3 bg-primary/5 rounded-md border border-primary/20">
             <Info className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
             <p className="text-xs text-muted-foreground">
-              The orchestration layer is designed to be LLM-agnostic. Swap providers by updating the edge function configuration.
+              The orchestration layer is LLM-agnostic. Swap providers by updating the edge function configuration.
             </p>
           </div>
         </div>
       </section>
 
-      {/* API Keys */}
       <section className="space-y-4">
         <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-widest">API Keys</h2>
         <div className="bg-card border border-border rounded-lg p-4 space-y-3">
@@ -69,7 +58,6 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* GitHub */}
       <section className="space-y-4">
         <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-widest">Repository Integration</h2>
         <div className="bg-card border border-border rounded-lg p-4">
@@ -86,7 +74,6 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Architecture */}
       <section className="space-y-4">
         <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-widest">Architecture</h2>
         <div className="bg-card border border-border rounded-lg p-4">
@@ -105,7 +92,7 @@ export default function SettingsPage() {
             </div>
             <div>
               <span className="text-muted-foreground">LLM</span>
-              <p className="text-foreground font-mono text-xs mt-1">xAI Grok API</p>
+              <p className="text-foreground font-mono text-xs mt-1">Groq API (Llama 3.3)</p>
             </div>
           </div>
         </div>
