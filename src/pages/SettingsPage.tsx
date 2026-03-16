@@ -41,9 +41,10 @@ export default function SettingsPage() {
               onChange={(e) => setModel(e.target.value)}
               className="w-full bg-secondary border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50"
             >
-              <option value="grok-3-mini">grok-3-mini (Fast)</option>
-              <option value="grok-3">grok-3 (Balanced)</option>
+              <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile (Default)</option>
+              <option value="llama-3.1-8b-instant">llama-3.1-8b-instant (Fast)</option>
             </select>
+          </div>
           </div>
           <div className="flex items-start gap-2 p-3 bg-primary/5 rounded-md border border-primary/20">
             <Info className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
