@@ -187,7 +187,7 @@ const Index = () => {
             </button>
           </div>
           <p className="text-xs text-muted-foreground mt-2 text-center">
-            Powered by Grok · Skills-based orchestration
+            Powered by Groq · Skills-based orchestration
           </p>
         </div>
       </div>

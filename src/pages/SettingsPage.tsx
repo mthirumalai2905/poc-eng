@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Settings, Key, GitBranch, Database, Info } from "lucide-react";
 
 export default function SettingsPage() {
-  const [model, setModel] = useState("grok-3-mini");
+  const [model, setModel] = useState("llama-3.3-70b-versatile");
 
   return (
     <div className="max-w-2xl mx-auto w-full p-6 space-y-8">
