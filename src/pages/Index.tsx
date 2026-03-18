@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Loader2, Blocks, Sparkles } from "lucide-react";
+import { Send, Loader2, Sparkles, Bot, User } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { streamChat } from "@/lib/chat-stream";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -12,7 +11,7 @@ const SUGGESTIONS = [
   "Generate an AWS Lambda function with SQS trigger and DLQ",
   "Design a schema for an e-commerce order system",
   "Create a Spark pipeline for user event aggregation",
-  "Add monitoring instrumentation to a Python service",
+  "Deploy a service to GitHub with CI/CD pipeline",
 ];
 
 const Index = () => {
@@ -20,6 +19,7 @@ const Index = () => {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -34,6 +34,11 @@ const Index = () => {
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setIsLoading(true);
+
+    // Reset textarea height
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
 
     let assistantSoFar = "";
     const upsertAssistant = (chunk: string) => {
@@ -76,37 +81,36 @@ const Index = () => {
   const isEmpty = messages.length === 0;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Messages area */}
-      <div className="flex-1 overflow-y-auto">
+    <div className="flex flex-col h-full relative">
+      {/* Scrollable messages area */}
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
         {isEmpty ? (
           <div className="flex flex-col items-center justify-center h-full px-4">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="text-center max-w-2xl"
+              transition={{ duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+              className="text-center max-w-xl"
             >
-              <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-6">
-                <Sparkles className="h-8 w-8 text-primary" />
+              <div className="h-12 w-12 rounded-full border border-border flex items-center justify-center mx-auto mb-6">
+                <Sparkles className="h-5 w-5 text-foreground" />
               </div>
-              <h2 className="text-2xl font-semibold text-foreground mb-2">
+              <h2 className="text-xl font-medium text-foreground mb-1 tracking-tight">
                 Architect
               </h2>
-              <p className="text-muted-foreground mb-8">
-                AI-powered engineering assistant. Generate production-ready code,
-                schemas, and pipelines using modular skills.
+              <p className="text-sm text-muted-foreground mb-10">
+                AI engineering assistant with skill-based orchestration.
               </p>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {SUGGESTIONS.map((s, i) => (
                   <motion.button
                     key={i}
-                    initial={{ opacity: 0, y: 10 }}
+                    initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 * i }}
+                    transition={{ delay: 0.15 + 0.08 * i, ease: "easeOut" }}
                     onClick={() => handleSubmit(s)}
-                    className="text-left p-4 rounded-lg border border-border bg-card hover:bg-secondary/50 hover:border-primary/30 transition-all text-sm text-muted-foreground hover:text-foreground"
+                    className="text-left px-4 py-3 rounded-lg border border-border bg-card hover:bg-accent hover:border-muted-foreground/20 transition-all text-xs text-muted-foreground hover:text-foreground"
                   >
                     {s}
                   </motion.button>
@@ -115,29 +119,40 @@ const Index = () => {
             </motion.div>
           </div>
         ) : (
-          <div className="max-w-3xl mx-auto w-full px-4 py-6 space-y-6">
-            <AnimatePresence>
+          <div className="max-w-3xl mx-auto w-full px-4 py-6 space-y-1">
+            <AnimatePresence initial={false}>
               {messages.map((msg, i) => (
                 <motion.div
                   key={i}
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                  transition={{ duration: 0.3, ease: "easeOut" }}
+                  className="py-4"
                 >
-                  <div
-                    className={`max-w-[85%] rounded-xl px-4 py-3 ${
-                      msg.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-card border border-border"
-                    }`}
-                  >
-                    {msg.role === "assistant" ? (
-                      <div className="prose-architect text-sm">
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
-                      </div>
-                    ) : (
-                      <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                    )}
+                  <div className="flex gap-3">
+                    <div className="flex-shrink-0 mt-0.5">
+                      {msg.role === "user" ? (
+                        <div className="h-7 w-7 rounded-full bg-foreground flex items-center justify-center">
+                          <User className="h-3.5 w-3.5 text-background" />
+                        </div>
+                      ) : (
+                        <div className="h-7 w-7 rounded-full border border-border flex items-center justify-center">
+                          <Bot className="h-3.5 w-3.5 text-muted-foreground" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-muted-foreground mb-1.5">
+                        {msg.role === "user" ? "You" : "Architect"}
+                      </p>
+                      {msg.role === "assistant" ? (
+                        <div className="prose-architect">
+                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-foreground whitespace-pre-wrap">{msg.content}</p>
+                      )}
+                    </div>
                   </div>
                 </motion.div>
               ))}
@@ -146,11 +161,16 @@ const Index = () => {
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="flex justify-start"
+                className="py-4"
               >
-                <div className="bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  <span>Reasoning...</span>
+                <div className="flex gap-3">
+                  <div className="h-7 w-7 rounded-full border border-border flex items-center justify-center flex-shrink-0">
+                    <Bot className="h-3.5 w-3.5 text-muted-foreground" />
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>Thinking...</span>
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -159,10 +179,10 @@ const Index = () => {
         )}
       </div>
 
-      {/* Input area */}
-      <div className="border-t border-border p-4">
+      {/* Sticky bottom input */}
+      <div className="sticky bottom-0 border-t border-border bg-background p-4">
         <div className="max-w-3xl mx-auto">
-          <div className="relative flex items-end bg-card border border-border rounded-xl focus-within:border-primary/50 focus-within:glow-indigo transition-all">
+          <div className="relative flex items-end bg-card border border-border rounded-xl focus-within:border-muted-foreground/30 transition-all">
             <textarea
               ref={textareaRef}
               value={input}
@@ -181,13 +201,13 @@ const Index = () => {
             <button
               onClick={() => handleSubmit()}
               disabled={!input.trim() || isLoading}
-              className="m-2 p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-30 hover:bg-primary/90 transition-colors"
+              className="m-2 p-2 rounded-lg bg-foreground text-background disabled:opacity-20 hover:bg-foreground/90 transition-colors"
             >
               <Send className="h-4 w-4" />
             </button>
           </div>
-          <p className="text-xs text-muted-foreground mt-2 text-center">
-            Powered by Groq · Skills-based orchestration
+          <p className="text-[10px] text-muted-foreground mt-2 text-center tracking-wide">
+            Groq · Skill Orchestration · Monitoring Enabled
           </p>
         </div>
       </div>

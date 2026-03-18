@@ -7,6 +7,8 @@ import { Layout } from "@/components/Layout";
 import Index from "./pages/Index.tsx";
 import Skills from "./pages/Skills.tsx";
 import SettingsPage from "./pages/SettingsPage.tsx";
+import MonitoringPage from "./pages/MonitoringPage.tsx";
+import LifecyclePage from "./pages/LifecyclePage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -21,6 +23,8 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/skills" element={<Skills />} />
+            <Route path="/monitoring" element={<MonitoringPage />} />
+            <Route path="/lifecycle" element={<LifecyclePage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
