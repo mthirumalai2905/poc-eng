@@ -73,6 +73,206 @@ export type Database = {
           },
         ]
       }
+      lifecycle_artifacts: {
+        Row: {
+          artifact_type: string
+          content: string | null
+          created_at: string
+          file_path: string
+          id: string
+          metadata: Json | null
+          session_id: string
+          status: string
+          version: number
+        }
+        Insert: {
+          artifact_type: string
+          content?: string | null
+          created_at?: string
+          file_path: string
+          id?: string
+          metadata?: Json | null
+          session_id: string
+          status?: string
+          version?: number
+        }
+        Update: {
+          artifact_type?: string
+          content?: string | null
+          created_at?: string
+          file_path?: string
+          id?: string
+          metadata?: Json | null
+          session_id?: string
+          status?: string
+          version?: number
+        }
+        Relationships: []
+      }
+      lifecycle_sessions: {
+        Row: {
+          created_at: string
+          current_state: string
+          id: string
+          metadata: Json | null
+          project_name: string
+          session_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          current_state?: string
+          id?: string
+          metadata?: Json | null
+          project_name?: string
+          session_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          current_state?: string
+          id?: string
+          metadata?: Json | null
+          project_name?: string
+          session_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      lifecycle_transitions: {
+        Row: {
+          created_at: string
+          from_state: string
+          id: string
+          metadata: Json | null
+          session_id: string
+          to_state: string
+          triggered_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          from_state: string
+          id?: string
+          metadata?: Json | null
+          session_id: string
+          to_state: string
+          triggered_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          from_state?: string
+          id?: string
+          metadata?: Json | null
+          session_id?: string
+          to_state?: string
+          triggered_by?: string | null
+        }
+        Relationships: []
+      }
+      monitoring_nodes: {
+        Row: {
+          completed_at: string | null
+          duration_ms: number | null
+          error_message: string | null
+          id: string
+          input_data: Json | null
+          node_label: string
+          node_type: string
+          output_data: Json | null
+          started_at: string | null
+          status: string
+          step_order: number
+          trace_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          duration_ms?: number | null
+          error_message?: string | null
+          id?: string
+          input_data?: Json | null
+          node_label: string
+          node_type: string
+          output_data?: Json | null
+          started_at?: string | null
+          status?: string
+          step_order: number
+          trace_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          duration_ms?: number | null
+          error_message?: string | null
+          id?: string
+          input_data?: Json | null
+          node_label?: string
+          node_type?: string
+          output_data?: Json | null
+          started_at?: string | null
+          status?: string
+          step_order?: number
+          trace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "monitoring_nodes_trace_id_fkey"
+            columns: ["trace_id"]
+            isOneToOne: false
+            referencedRelation: "monitoring_traces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      monitoring_traces: {
+        Row: {
+          completed_at: string | null
+          conversation_id: string | null
+          created_at: string
+          id: string
+          message_id: string | null
+          metadata: Json | null
+          session_id: string
+          status: string
+          total_duration_ms: number | null
+        }
+        Insert: {
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          message_id?: string | null
+          metadata?: Json | null
+          session_id: string
+          status?: string
+          total_duration_ms?: number | null
+        }
+        Update: {
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          message_id?: string | null
+          metadata?: Json | null
+          session_id?: string
+          status?: string
+          total_duration_ms?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "monitoring_traces_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "chat_conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "monitoring_traces_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "chat_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       skills: {
         Row: {
           category: string
