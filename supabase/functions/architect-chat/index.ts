@@ -29,20 +29,19 @@ serve(async (req) => {
     const { messages } = await req.json();
     const userMessage = messages[messages.length - 1]?.content || "";
 
-    // Create a ReadableStream that first sends status events, then pipes LLM stream
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          // ─── Phase 1: Retrieve skills & files, sending status events ───
+          // ─── Phase 1: Load skill metadata (only name/category/description) ───
           controller.enqueue(sseEvent("status", { step: "Loading skills registry..." }));
 
           const { data: skills } = await supabase
             .from("skills")
-            .select("id, name, description, instructions, category");
+            .select("id, name, description, category");
 
           controller.enqueue(sseEvent("status", { step: `Found ${(skills || []).length} skills` }));
 
-          // Detect which directories the user mentioned
+          // Detect mentioned directories
           const dirKeywords = ["references", "scripts", "agents", "assets", "eval-viewer"];
           const mentionedDirs = dirKeywords.filter((d) =>
             userMessage.toLowerCase().includes(d)
@@ -52,24 +51,25 @@ serve(async (req) => {
 
           for (const skill of skills || []) {
             const skillDir = `${skill.id}/`;
-            const fileContents: string[] = [];
 
-            controller.enqueue(sseEvent("status", { step: `Scanning files for skill: ${skill.name}` }));
+            controller.enqueue(sseEvent("status", { step: `Scanning storage: ${skill.name}/` }));
 
+            // ─── DYNAMIC: List ALL actual files from Supabase storage ───
             const allFiles = await listAllFiles(supabase, "skill-files", skillDir);
 
-            // If user mentioned specific dirs, filter to only those
+            controller.enqueue(sseEvent("status", { step: `Found ${allFiles.length} files in ${skill.name}/` }));
+
+            // If user mentioned specific dirs, filter to ONLY those + SKILL.md
             let filesToRead = allFiles;
             if (mentionedDirs.length > 0) {
               filesToRead = allFiles.filter((f) => {
                 const rel = f.replace(skillDir, "");
-                // Always include SKILL.md
                 if (rel === "SKILL.md") return true;
-                return mentionedDirs.some((d) => rel.startsWith(d + "/") || rel.startsWith(d));
+                return mentionedDirs.some((d) => rel.startsWith(d + "/") || rel === d);
               });
               controller.enqueue(
                 sseEvent("status", {
-                  step: `Focused on directories: ${mentionedDirs.join(", ")} (${filesToRead.length} files)`,
+                  step: `Filtered to ${mentionedDirs.join(", ")} → ${filesToRead.length} files`,
                 })
               );
             }
@@ -82,9 +82,11 @@ serve(async (req) => {
               return (aP === -1 ? 99 : aP) - (bP === -1 ? 99 : bP);
             });
 
-            // Read up to 20 files
             const capped = filesToRead.slice(0, 20);
+            const fileContents: string[] = [];
+            const fileList: string[] = [];
 
+            // ─── DYNAMIC: Read actual file contents from storage ───
             for (const filePath of capped) {
               const relativePath = filePath.replace(skillDir, "");
               controller.enqueue(sseEvent("status", { step: `Reading: ${skill.name}/${relativePath}` }));
@@ -100,19 +102,22 @@ serve(async (req) => {
                     fileContents.push(
                       `#### File: ${relativePath}\n\`\`\`\n${text.slice(0, 4000)}\n\`\`\``
                     );
+                    fileList.push(relativePath);
                   }
                 }
               } catch {
-                // Skip unreadable files
+                controller.enqueue(sseEvent("status", { step: `⚠ Could not read: ${relativePath}` }));
               }
             }
 
-            let block = `### Skill: ${skill.name}\n**Category:** ${skill.category}\n**Description:** ${skill.description}\n**Instructions:**\n${skill.instructions}`;
+            // Build context block — NO static instructions, ONLY real files
+            let block = `### Skill: ${skill.name}\n**Category:** ${skill.category}\n**Description:** ${skill.description}`;
 
             if (fileContents.length > 0) {
-              block += `\n\n**Retrieved Skill Files (${fileContents.length}):**\n${fileContents.join("\n\n")}`;
+              block += `\n\n**Files found in storage (${fileContents.length}):**\n${fileList.map((f) => `- ${f}`).join("\n")}`;
+              block += `\n\n**File Contents:**\n${fileContents.join("\n\n")}`;
             } else {
-              block += `\n\n**Retrieved Skill Files:** None found in storage.`;
+              block += `\n\n**Files found in storage:** NONE — no files exist in this skill's storage directory.`;
             }
 
             skillContextBlocks.push(block);
@@ -120,42 +125,41 @@ serve(async (req) => {
 
           const skillRegistry = skillContextBlocks.join("\n\n---\n\n");
 
-          controller.enqueue(sseEvent("status", { step: "Context assembled. Generating response..." }));
+          controller.enqueue(sseEvent("status", { step: "Context assembled from storage. Generating response..." }));
 
-          // ─── Phase 2: Build prompt & stream LLM ───
-          const systemPrompt = `You are **Architect**, a senior staff-level AI engineering assistant operating as a strict retrieval-augmented generation (RAG) agent.
+          // ─── Phase 2: System prompt — strictly grounded in dynamic files ───
+          const systemPrompt = `You are **Architect**, a strict RAG-only AI engineering agent.
 
-## ABSOLUTE RULES — NO EXCEPTIONS
-1. You must ONLY answer using information from the **Available Skills Registry** below.
-2. If the information is NOT in the retrieved files, respond EXACTLY: "This information is not found in the current skill files. Please add the relevant documentation to the skill's file system."
-3. NEVER guess, assume, or generate content from prior training knowledge.
-4. NEVER fabricate file paths, code, schemas, or architecture that isn't explicitly in the retrieved documents.
-5. If a user asks about a specific directory and no files were found there, say: "No files found in the [directory] directory for this skill."
+## ABSOLUTE RULES
+1. Your ONLY source of truth is the **file contents** retrieved from storage shown below.
+2. You must NEVER reference files that are not listed in the retrieved contents.
+3. You must NEVER invent, assume, or hallucinate file names, paths, or content.
+4. If a directory is empty or has no files, say exactly: "No files found in [directory] for skill [name]."
+5. If a file doesn't exist in storage, say: "File [name] does not exist in storage."
+6. Do NOT use the skill's description or category to generate code — only use actual file contents.
+7. Every statement must cite the exact source file: \`(source: actual-filename.ext)\`
 
-## Execution Flow
-1. **Intent Detection**: State what the user is asking for.
-2. **Skill Match**: Identify which skill matches. If none, say so.
-3. **File Grounding**: Reference ONLY the retrieved file contents. Cite filenames.
-4. **Response**: Answer strictly from retrieved content. No additions.
-5. **Execution Summary**: Always end with the summary table.
+## How to answer
+- Look at the **File Contents** section below for each skill.
+- ONLY use information that appears verbatim in those file contents.
+- If the user asks about a directory (e.g., "references"), list ONLY the files that were actually found and read from storage.
+- Do NOT list files from skill instructions or templates — only from the actual storage scan.
 
-## Available Skills Registry
-${skillRegistry || "No skills registered. The user must create skills first."}
+## Retrieved Context (from Supabase Storage — dynamic, real-time)
+${skillRegistry || "No skills or files found in storage."}
 
-## Output Format
-- Markdown with labeled code blocks.
-- Cite the source file for every claim: \`(source: filename.md)\`
-- No placeholder data unless the source file contains it.
+## Response format
+- Markdown with code blocks labeled with filenames.
+- Cite source files for every claim.
+- End with execution summary table:
 
-## Execution Summary (required at end)
 | Field | Value |
 |---|---|
 | **Intent** | <what user asked> |
-| **Skill Used** | <name or None> |
-| **Files Retrieved** | <count and names> |
-| **Artifacts Generated** | <list> |
-| **Status** | ✅ Complete / ⚠️ Partial / ❌ No matching files |
-| **Grounding** | Strictly from retrieved files |`;
+| **Skill** | <matched skill or None> |
+| **Files Read** | <actual files read from storage> |
+| **Artifacts** | <generated outputs> |
+| **Status** | ✅ / ⚠️ / ❌ |`;
 
           const llmResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
@@ -183,7 +187,7 @@ ${skillRegistry || "No skills registered. The user must create skills first."}
             return;
           }
 
-          // Pipe through the LLM SSE stream
+          // Pipe LLM stream
           const reader = llmResponse.body!.getReader();
           while (true) {
             const { done, value } = await reader.read();
@@ -214,13 +218,11 @@ ${skillRegistry || "No skills registered. The user must create skills first."}
   }
 });
 
-// Recursively list all text files in a storage path
 async function listAllFiles(supabase: any, bucket: string, prefix: string): Promise<string[]> {
   const files: string[] = [];
   try {
     const { data: items } = await supabase.storage.from(bucket).list(prefix, { limit: 100 });
     if (!items) return files;
-
     for (const item of items) {
       const fullPath = `${prefix}${item.name}`;
       if (item.id === null || item.metadata === undefined) {
