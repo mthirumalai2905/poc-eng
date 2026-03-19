@@ -34,6 +34,9 @@
     --input: 0 0% 12%;
     --ring: 0 0% 40%;
 
+    --success: 142 71% 45%;
+    --success-foreground: 142 71% 75%;
+
     --radius: 0.5rem;
 
     --sidebar-background: 0 0% 3%;
