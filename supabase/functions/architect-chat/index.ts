@@ -23,46 +23,113 @@ serve(async (req) => {
 
     const { messages } = await req.json();
 
-    // Load all skills for context
+    // ─── Step 1: Load all skills metadata from DB ───
     const { data: skills } = await supabase
       .from("skills")
-      .select("name, description, instructions, category");
+      .select("id, name, description, instructions, category");
 
-    // Build the skill registry context
-    const skillRegistry = (skills || [])
-      .map(
-        (s: any) =>
-          `### Skill: ${s.name}\n**Category:** ${s.category}\n**Description:** ${s.description}\n**Instructions:**\n${s.instructions}`
-      )
-      .join("\n\n---\n\n");
+    // ─── Step 2: For each skill, retrieve files from storage (RAG retrieval) ───
+    const skillContextBlocks: string[] = [];
 
-    const systemPrompt = `You are **Architect**, a senior staff-level AI engineering assistant. You generate production-ready code, schemas, and pipelines using modular engineering skills.
+    for (const skill of skills || []) {
+      const skillDir = `${skill.id}/`;
+      let fileContents: string[] = [];
 
-## Execution Pipeline
+      // List all files recursively in the skill's storage directory
+      const retrievedFiles = await listAllFiles(supabase, "skill-files", skillDir);
+
+      // Prioritize key files: SKILL.md, references/, agents/
+      const priorityPaths = [
+        "SKILL.md",
+        "references/",
+        "agents/",
+        "scripts/",
+      ];
+
+      // Sort: priority files first
+      const sorted = retrievedFiles.sort((a, b) => {
+        const aP = priorityPaths.findIndex((p) => a.includes(p));
+        const bP = priorityPaths.findIndex((p) => b.includes(p));
+        return (aP === -1 ? 99 : aP) - (bP === -1 ? 99 : bP);
+      });
+
+      // Read up to 15 files per skill to stay within context limits
+      const filesToRead = sorted.slice(0, 15);
+
+      for (const filePath of filesToRead) {
+        try {
+          const { data: fileData } = await supabase.storage
+            .from("skill-files")
+            .download(filePath);
+
+          if (fileData) {
+            const text = await fileData.text();
+            if (text.trim()) {
+              const relativePath = filePath.replace(skillDir, "");
+              fileContents.push(
+                `#### File: ${relativePath}\n\`\`\`\n${text.slice(0, 3000)}\n\`\`\``
+              );
+            }
+          }
+        } catch {
+          // Skip unreadable files
+        }
+      }
+
+      // Build skill context block
+      let block = `### Skill: ${skill.name}\n**Category:** ${skill.category}\n**Description:** ${skill.description}\n**Instructions:**\n${skill.instructions}`;
+
+      if (fileContents.length > 0) {
+        block += `\n\n**Retrieved Skill Files (${fileContents.length}):**\n${fileContents.join("\n\n")}`;
+      }
+
+      skillContextBlocks.push(block);
+    }
+
+    const skillRegistry = skillContextBlocks.join("\n\n---\n\n");
+
+    // ─── Step 3: Build RAG-enforced system prompt ───
+    const systemPrompt = `You are **Architect**, a senior staff-level AI engineering assistant operating as a strict retrieval-augmented generation (RAG) agent with skill-based orchestration.
+
+## CRITICAL: RAG-Only Behavior
+- You must NEVER hallucinate, guess, or fabricate file paths, directory contents, schemas, or architecture patterns.
+- You must ONLY use information explicitly present in the **Available Skills Registry** below.
+- If information is not found in the retrieved skill documents, you MUST explicitly state: "This information is not found in the current skill files."
+- You are NOT allowed to generate answers from prior knowledge or assumptions. Every claim must be grounded in retrieved content.
+- Treat the skill file system as the **single source of truth**.
+
+## Execution Pipeline (Strict Sequence)
 When a user submits a request:
-1. **Intent Detection**: Analyze the prompt and determine which skill best matches.
-2. **Skill Loading**: Use the matched skill's instructions as your primary guideline.
-3. **Context Assembly**: Combine user request + skill instructions.
-4. **Planning**: Generate a short execution plan.
-5. **Generation**: Produce engineering artifacts (code, schemas, configs, etc.) strictly following the skill instructions.
-6. **Validation**: Ensure output respects naming conventions, monitoring requirements, and architecture rules.
+1. **Intent Detection**: Analyze the prompt and determine which skill best matches. State the detected intent explicitly.
+2. **Directory Resolution**: If the user mentions a specific directory (references/, scripts/, agents/, etc.), focus ONLY on that directory. Otherwise, load all relevant files.
+3. **Skill Loading**: Use the matched skill's instructions AND retrieved file contents as your primary context.
+4. **Context Assembly**: Combine user request + skill instructions + retrieved file contents. No external knowledge.
+5. **Planning**: Generate a short execution plan grounded in retrieved documents.
+6. **Generation**: Produce engineering artifacts (code, schemas, configs, etc.) strictly following the skill instructions and file contents.
+7. **Validation**: Ensure output respects naming conventions, monitoring requirements, and architecture rules defined in the skill files.
 
 ## Available Skills Registry
-${skillRegistry || "No skills registered yet."}
+${skillRegistry || "No skills registered yet. Suggest the user create a skill first."}
 
-## Rules
-- Never fabricate architecture, schemas, or standards not present in skill instructions.
-- Always follow the skill's SKILL.md instructions step by step.
-- Use deterministic, structured output. No placeholder or mock data.
-- If no skill matches, say so and suggest creating one.
-- If a skill has insufficient documentation, warn the user.
-- Always end with an **Execution Summary** table showing: Intent, Skill Used, Context Loaded, Artifacts Generated, and Status.
-
-## Output Format
+## Output Rules
 - Use markdown with code blocks for all generated code.
 - Label each code block with the filename.
-- Provide clear explanations of architectural decisions.
-- Be precise, objective, and architecture-first.`;
+- Be precise, objective, and architecture-first.
+- Never include placeholder or mock data unless the skill explicitly allows it.
+- If no skill matches the request, say so and suggest creating one.
+- If a skill has insufficient documentation or files, warn the user explicitly.
+
+## Execution Summary
+Always end your response with an **Execution Summary** in this exact markdown table format:
+
+| Field | Value |
+|---|---|
+| **Intent** | <detected intent> |
+| **Skill Used** | <skill name or "None"> |
+| **Files Retrieved** | <count and key filenames> |
+| **Artifacts Generated** | <list of generated files/outputs> |
+| **Status** | ✅ Complete / ⚠️ Partial / ❌ Failed |
+| **Grounding** | All outputs grounded in retrieved skill files |`;
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -82,22 +149,22 @@ ${skillRegistry || "No skills registered yet."}
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error("Grok API error:", response.status, errText);
+      console.error("Groq API error:", response.status, errText);
 
       if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded" }), {
+        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please wait and try again." }), {
           status: 429,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "Payment required" }), {
+        return new Response(JSON.stringify({ error: "Payment required." }), {
           status: 402,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      return new Response(JSON.stringify({ error: `Grok API error: ${response.status}` }), {
+      return new Response(JSON.stringify({ error: `API error: ${response.status}` }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -117,3 +184,40 @@ ${skillRegistry || "No skills registered yet."}
     );
   }
 });
+
+// ─── Helper: Recursively list all files in a storage bucket path ───
+async function listAllFiles(
+  supabase: any,
+  bucket: string,
+  prefix: string
+): Promise<string[]> {
+  const files: string[] = [];
+
+  try {
+    const { data: items } = await supabase.storage
+      .from(bucket)
+      .list(prefix, { limit: 100 });
+
+    if (!items) return files;
+
+    for (const item of items) {
+      const fullPath = `${prefix}${item.name}`;
+      if (item.id === null || item.metadata === undefined) {
+        // It's a folder — recurse
+        const subFiles = await listAllFiles(supabase, bucket, `${fullPath}/`);
+        files.push(...subFiles);
+      } else {
+        // It's a file — only include text-readable files
+        const ext = item.name.split(".").pop()?.toLowerCase() || "";
+        const textExts = ["md", "txt", "py", "js", "ts", "json", "yaml", "yml", "html", "css", "toml", "cfg", "ini", "sh"];
+        if (textExts.includes(ext)) {
+          files.push(fullPath);
+        }
+      }
+    }
+  } catch {
+    // Storage path may not exist yet
+  }
+
+  return files;
+}
