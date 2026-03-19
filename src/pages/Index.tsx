@@ -184,32 +184,36 @@ const Index = () => {
                 className="py-4"
               >
                 <div className="flex gap-3">
-                  <div className="h-7 w-7 rounded-full border border-border flex items-center justify-center flex-shrink-0">
-                    <Bot className="h-3.5 w-3.5 text-muted-foreground" />
+                  <div className="h-7 w-7 rounded-full border border-success/30 bg-success/10 flex items-center justify-center flex-shrink-0">
+                    <Bot className="h-3.5 w-3.5 text-success" />
                   </div>
                   <div className="flex-1">
-                    <p className="text-xs font-medium text-muted-foreground mb-2">
-                      Architect — retrieving context
+                    <p className="text-xs font-medium text-success mb-2">
+                      Architect — reading files from storage
                     </p>
                     <div className="space-y-1 font-mono">
                       {statusSteps.map((step, idx) => {
                         const isLatest = idx === statusSteps.length - 1;
                         const isFileRead = step.startsWith("Reading:");
+                        const isWarning = step.startsWith("⚠");
                         return (
                           <motion.div
                             key={idx}
                             initial={{ opacity: 0, x: -4 }}
-                            animate={{ opacity: isLatest ? 1 : 0.4, x: 0 }}
+                            animate={{ opacity: isLatest ? 1 : 0.5, x: 0 }}
                             transition={{ duration: 0.15 }}
                             className="flex items-center gap-2 text-[11px]"
                           >
                             {isLatest ? (
-                              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground flex-shrink-0" />
+                              <Loader2 className="h-3 w-3 animate-spin text-success flex-shrink-0" />
                             ) : (
-                              <CheckCircle2 className="h-3 w-3 text-muted-foreground/40 flex-shrink-0" />
+                              <CheckCircle2 className="h-3 w-3 text-success/50 flex-shrink-0" />
                             )}
-                            {isFileRead && <FileText className="h-3 w-3 text-muted-foreground/60 flex-shrink-0" />}
-                            <span className={isLatest ? "text-foreground" : "text-muted-foreground/50"}>
+                            {isFileRead && <FileText className="h-3 w-3 text-success/60 flex-shrink-0" />}
+                            <span className={
+                              isWarning ? "text-yellow-500" :
+                              isLatest ? "text-success-foreground" : "text-success/40"
+                            }>
                               {step}
                             </span>
                           </motion.div>
