@@ -49,15 +49,65 @@ export default function Skills() {
 
   useEffect(() => { seedDefaults(); }, []);
 
-  const handleCreate = async () => {
-    if (!form.name || !form.description || !form.instructions) { toast.error("All fields required"); return; }
-    const { error } = await supabase.from("skills").insert({ name: form.name, description: form.description, instructions: form.instructions, category: form.category });
-    if (error) { toast.error(error.message); return; }
-    toast.success("Skill created");
-    setForm({ name: "", description: "", instructions: "", category: "general" });
-    setIsCreating(false);
-    fetchSkills();
-  };
+ const handleCreate = async () => {
+  if (!form.name || !form.description || !form.instructions) {
+    toast.error("All fields required");
+    return;
+  }
+
+  // 1. Insert into DB AND get inserted row
+  const { data, error } = await supabase
+    .from("skills")
+    .insert({
+      name: form.name,
+      description: form.description,
+      instructions: form.instructions,
+      category: form.category
+    })
+    .select()
+    .single();
+
+  if (error) {
+    toast.error(error.message);
+    return;
+  }
+
+  const skillId = data.id;
+
+  try {
+    // 2. Create SKILL.md file
+    await supabase.storage
+      .from("skill-files")
+      .upload(`${skillId}/SKILL.md`, new Blob([form.instructions], { type: "text/markdown" }));
+
+    // 3. Create empty folders (via .keep files)
+    await supabase.storage
+      .from("skill-files")
+      .upload(`${skillId}/references/.keep`, new Blob([""], { type: "text/plain" }));
+
+    await supabase.storage
+      .from("skill-files")
+      .upload(`${skillId}/scripts/.keep`, new Blob([""], { type: "text/plain" }));
+
+    await supabase.storage
+      .from("skill-files")
+      .upload(`${skillId}/agents/.keep`, new Blob([""], { type: "text/plain" }));
+
+    await supabase.storage
+      .from("skill-files")
+      .upload(`${skillId}/assets/.keep`, new Blob([""], { type: "text/plain" }));
+
+  } catch (e) {
+    console.error("Storage error:", e);
+    toast.error("Skill created but file setup failed");
+  }
+
+  toast.success("Skill created");
+
+  setForm({ name: "", description: "", instructions: "", category: "general" });
+  setIsCreating(false);
+  fetchSkills();
+};
 
   const handleUpdate = async () => {
     if (!editingSkill) return;
