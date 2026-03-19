@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Loader2, Sparkles, Bot, User } from "lucide-react";
+import { Send, Loader2, Sparkles, Bot, User, FileText, CheckCircle2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { streamChat } from "@/lib/chat-stream";
 import { toast } from "sonner";
@@ -18,13 +18,15 @@ const Index = () => {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [statusSteps, setStatusSteps] = useState<string[]>([]);
+  const [isRetrieving, setIsRetrieving] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, statusSteps]);
 
   const handleSubmit = async (text?: string) => {
     const messageText = text || input.trim();
@@ -34,14 +36,21 @@ const Index = () => {
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setIsLoading(true);
+    setIsRetrieving(true);
+    setStatusSteps([]);
 
-    // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
 
     let assistantSoFar = "";
+    let receivedFirstDelta = false;
+
     const upsertAssistant = (chunk: string) => {
+      if (!receivedFirstDelta) {
+        receivedFirstDelta = true;
+        setIsRetrieving(false);
+      }
       assistantSoFar += chunk;
       setMessages((prev) => {
         const last = prev[prev.length - 1];
@@ -58,16 +67,27 @@ const Index = () => {
       await streamChat({
         messages: [...messages, userMsg],
         onDelta: (chunk) => upsertAssistant(chunk),
-        onDone: () => setIsLoading(false),
+        onStatus: (step) => {
+          setStatusSteps((prev) => [...prev, step]);
+        },
+        onDone: () => {
+          setIsLoading(false);
+          setIsRetrieving(false);
+          setStatusSteps([]);
+        },
         onError: (err) => {
           toast.error(err);
           setIsLoading(false);
+          setIsRetrieving(false);
+          setStatusSteps([]);
         },
       });
     } catch (e) {
       console.error(e);
       toast.error("Failed to get response");
       setIsLoading(false);
+      setIsRetrieving(false);
+      setStatusSteps([]);
     }
   };
 
@@ -99,7 +119,7 @@ const Index = () => {
                 Architect
               </h2>
               <p className="text-sm text-muted-foreground mb-10">
-                AI engineering assistant with skill-based orchestration.
+                RAG-powered engineering assistant. Reads your skill files before answering.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -120,44 +140,89 @@ const Index = () => {
           </div>
         ) : (
           <div className="max-w-3xl mx-auto w-full px-4 py-6 space-y-1">
-            <AnimatePresence initial={false}>
-              {messages.map((msg, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, ease: "easeOut" }}
-                  className="py-4"
-                >
-                  <div className="flex gap-3">
-                    <div className="flex-shrink-0 mt-0.5">
-                      {msg.role === "user" ? (
-                        <div className="h-7 w-7 rounded-full bg-foreground flex items-center justify-center">
-                          <User className="h-3.5 w-3.5 text-background" />
-                        </div>
-                      ) : (
-                        <div className="h-7 w-7 rounded-full border border-border flex items-center justify-center">
-                          <Bot className="h-3.5 w-3.5 text-muted-foreground" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-muted-foreground mb-1.5">
-                        {msg.role === "user" ? "You" : "Architect"}
-                      </p>
-                      {msg.role === "assistant" ? (
-                        <div className="prose-architect">
-                          <ReactMarkdown>{msg.content}</ReactMarkdown>
-                        </div>
-                      ) : (
-                        <p className="text-sm text-foreground whitespace-pre-wrap">{msg.content}</p>
-                      )}
+            {messages.map((msg, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+                className="py-4"
+              >
+                <div className="flex gap-3">
+                  <div className="flex-shrink-0 mt-0.5">
+                    {msg.role === "user" ? (
+                      <div className="h-7 w-7 rounded-full bg-foreground flex items-center justify-center">
+                        <User className="h-3.5 w-3.5 text-background" />
+                      </div>
+                    ) : (
+                      <div className="h-7 w-7 rounded-full border border-border flex items-center justify-center">
+                        <Bot className="h-3.5 w-3.5 text-muted-foreground" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-muted-foreground mb-1.5">
+                      {msg.role === "user" ? "You" : "Architect"}
+                    </p>
+                    {msg.role === "assistant" ? (
+                      <div className="prose-architect">
+                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-foreground whitespace-pre-wrap">{msg.content}</p>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+
+            {/* File retrieval progress indicator */}
+            {isLoading && isRetrieving && statusSteps.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="py-4"
+              >
+                <div className="flex gap-3">
+                  <div className="h-7 w-7 rounded-full border border-border flex items-center justify-center flex-shrink-0">
+                    <Bot className="h-3.5 w-3.5 text-muted-foreground" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-medium text-muted-foreground mb-2">
+                      Architect — retrieving context
+                    </p>
+                    <div className="space-y-1 font-mono">
+                      {statusSteps.map((step, idx) => {
+                        const isLatest = idx === statusSteps.length - 1;
+                        const isFileRead = step.startsWith("Reading:");
+                        return (
+                          <motion.div
+                            key={idx}
+                            initial={{ opacity: 0, x: -4 }}
+                            animate={{ opacity: isLatest ? 1 : 0.4, x: 0 }}
+                            transition={{ duration: 0.15 }}
+                            className="flex items-center gap-2 text-[11px]"
+                          >
+                            {isLatest ? (
+                              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground flex-shrink-0" />
+                            ) : (
+                              <CheckCircle2 className="h-3 w-3 text-muted-foreground/40 flex-shrink-0" />
+                            )}
+                            {isFileRead && <FileText className="h-3 w-3 text-muted-foreground/60 flex-shrink-0" />}
+                            <span className={isLatest ? "text-foreground" : "text-muted-foreground/50"}>
+                              {step}
+                            </span>
+                          </motion.div>
+                        );
+                      })}
                     </div>
                   </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-            {isLoading && messages[messages.length - 1]?.role === "user" && (
+                </div>
+              </motion.div>
+            )}
+
+            {/* Simple thinking indicator when no status yet */}
+            {isLoading && isRetrieving && statusSteps.length === 0 && (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -169,11 +234,12 @@ const Index = () => {
                   </div>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <Loader2 className="h-3 w-3 animate-spin" />
-                    <span>Thinking...</span>
+                    <span>Connecting...</span>
                   </div>
                 </div>
               </motion.div>
             )}
+
             <div ref={messagesEndRef} />
           </div>
         )}
@@ -207,7 +273,7 @@ const Index = () => {
             </button>
           </div>
           <p className="text-[10px] text-muted-foreground mt-2 text-center tracking-wide">
-            Groq · Skill Orchestration · Monitoring Enabled
+            RAG Pipeline · Skill File Retrieval · Groq
           </p>
         </div>
       </div>

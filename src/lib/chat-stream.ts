@@ -7,11 +7,13 @@ export async function streamChat({
   onDelta,
   onDone,
   onError,
+  onStatus,
 }: {
   messages: Msg[];
   onDelta: (deltaText: string) => void;
   onDone: () => void;
   onError?: (error: string) => void;
+  onStatus?: (step: string) => void;
 }) {
   const resp = await fetch(CHAT_URL, {
     method: "POST",
@@ -52,7 +54,16 @@ export async function streamChat({
       textBuffer = textBuffer.slice(newlineIndex + 1);
 
       if (line.endsWith("\r")) line = line.slice(0, -1);
-      if (line.startsWith(":") || line.trim() === "") continue;
+      if (line.trim() === "") continue;
+
+      // Handle custom status events
+      if (line.startsWith("event: status")) {
+        // Next data line contains the status payload
+        continue;
+      }
+
+      if (line.startsWith(":")) continue;
+
       if (!line.startsWith("data: ")) continue;
 
       const jsonStr = line.slice(6).trim();
@@ -63,9 +74,25 @@ export async function streamChat({
 
       try {
         const parsed = JSON.parse(jsonStr);
+
+        // Check if it's a status event
+        if (parsed.step && typeof parsed.step === "string") {
+          onStatus?.(parsed.step);
+          continue;
+        }
+
+        // Check for error
+        if (parsed.error) {
+          onError?.(parsed.error);
+          streamDone = true;
+          break;
+        }
+
+        // Normal LLM delta
         const content = parsed.choices?.[0]?.delta?.content as string | undefined;
         if (content) onDelta(content);
       } catch {
+        // Might be incomplete JSON, put it back
         textBuffer = line + "\n" + textBuffer;
         break;
       }
@@ -78,11 +105,16 @@ export async function streamChat({
       if (!raw) continue;
       if (raw.endsWith("\r")) raw = raw.slice(0, -1);
       if (raw.startsWith(":") || raw.trim() === "") continue;
+      if (raw.startsWith("event:")) continue;
       if (!raw.startsWith("data: ")) continue;
       const jsonStr = raw.slice(6).trim();
       if (jsonStr === "[DONE]") continue;
       try {
         const parsed = JSON.parse(jsonStr);
+        if (parsed.step) {
+          onStatus?.(parsed.step);
+          continue;
+        }
         const content = parsed.choices?.[0]?.delta?.content as string | undefined;
         if (content) onDelta(content);
       } catch { /* ignore */ }
