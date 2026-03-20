@@ -57,6 +57,41 @@ export default function SkillFileExplorer({ skillId, skillName }: Props) {
 
   const basePath = `skills/${skillId}`;
 
+  // Sync file tree to skill_files DB table for RAG retrieval
+  const syncFilesToDB = useCallback(async (nodes: FileNode[]) => {
+    const flatten = (items: FileNode[]): { file_path: string; file_name: string; is_folder: boolean; parent_path: string | null; storage_path: string; file_type: string | null }[] => {
+      const result: { file_path: string; file_name: string; is_folder: boolean; parent_path: string | null; storage_path: string; file_type: string | null }[] = [];
+      for (const node of items) {
+        const relPath = node.path.replace(`${basePath}/`, "");
+        const parentParts = relPath.split("/");
+        parentParts.pop();
+        const parentPath = parentParts.length > 0 ? parentParts.join("/") : null;
+        const ext = node.name.includes(".") ? node.name.split(".").pop() || null : null;
+        result.push({
+          file_path: relPath,
+          file_name: node.name,
+          is_folder: node.isFolder,
+          parent_path: parentPath,
+          storage_path: node.path,
+          file_type: ext,
+        });
+        if (node.isFolder && node.children) {
+          result.push(...flatten(node.children));
+        }
+      }
+      return result;
+    };
+
+    const rows = flatten(nodes);
+    // Clear old entries for this skill, then insert fresh
+    await supabase.from("skill_files").delete().eq("skill_id", skillId);
+    if (rows.length > 0) {
+      await supabase.from("skill_files").insert(
+        rows.map((r) => ({ skill_id: skillId, ...r }))
+      );
+    }
+  }, [basePath, skillId]);
+
   const listDirRecursive = useCallback(async (path: string, name: string): Promise<FileNode> => {
     const { data } = await supabase.storage.from("skill-files").list(path, { limit: 1000, sortBy: { column: "name", order: "asc" } });
     const children: FileNode[] = [];
