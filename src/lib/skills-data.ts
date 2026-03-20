@@ -183,4 +183,44 @@ Add comprehensive observability to any service or pipeline.
 7. Create runbook template`,
     category: "observability",
   },
+  {
+    name: "chart-master",
+    description: "Generates analytical reports and interactive visualizations including line charts, bar charts, pie charts, scatter plots, and dashboards based on real datasets from skill references. Validates data columns, selects axes and metrics, and produces production-ready React chart components using Recharts.",
+    instructions: `# Chart Master Skill
+
+## Overview
+Generate analytical reports and interactive visualizations from real datasets. This skill strictly validates data availability before generating any chart.
+
+## Pipeline
+1. **Intent Detection** — Determine what type of visualization the user wants (line, bar, pie, scatter, dashboard)
+2. **Data Validation** — Verify dataset and column availability from references. If data is missing, STOP and warn.
+3. **Axis & Metric Selection** — Select appropriate x/y axes, grouping, and aggregation metrics
+4. **Chart Type Selection** — Choose the most suitable chart type based on data shape and user intent
+5. **Component Generation** — Generate production-ready React components using Recharts
+6. **Interactivity** — Include tooltips, legends, responsive containers, and optional filters
+7. **Validation** — Ensure no hallucinated fields or fake data are used
+
+## Strict Rules
+- NEVER generate charts with fake/placeholder data
+- ALWAYS validate column names against the actual dataset schema
+- If the dataset is insufficient, return a warning with what's missing
+- Use only Recharts library for visualization
+- All components must be responsive and accessible
+
+## Output Format
+Return a complete React component with:
+- Proper imports from recharts
+- Typed data interface
+- ResponsiveContainer wrapper
+- Tooltip and Legend components
+- Color palette from the design system
+
+## Quality Checklist
+- [ ] Data columns exist in the referenced dataset
+- [ ] Chart type matches the data shape
+- [ ] Includes tooltips and legends
+- [ ] Responsive container used
+- [ ] No hardcoded/fake data points`,
+    category: "visualization",
+  },
 ];
