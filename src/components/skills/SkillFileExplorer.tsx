@@ -122,8 +122,10 @@ export default function SkillFileExplorer({ skillId, skillName }: Props) {
       })
     );
     setTree(nodes);
+    // Sync to DB for RAG retrieval
+    syncFilesToDB(nodes).catch(console.error);
     setLoading(false);
-  }, [basePath, listDirRecursive]);
+  }, [basePath, listDirRecursive, syncFilesToDB]);
 
   const scaffoldSkeleton = async () => {
     setScaffolding(true);
