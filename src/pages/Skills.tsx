@@ -19,7 +19,7 @@ type Skill = {
   updated_at: string;
 };
 
-const CATEGORIES = ["all", "serverless", "data-engineering", "data-modeling", "observability", "general"];
+const CATEGORIES = ["all", "serverless", "data-engineering", "data-modeling", "observability", "visualization", "general"];
 
 export default function Skills() {
   const [skills, setSkills] = useState<Skill[]>([]);
