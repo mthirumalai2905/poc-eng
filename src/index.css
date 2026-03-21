@@ -81,6 +81,46 @@
   }
 }
 
+/* Monitoring heartbeat glow animations */
+@keyframes monitoring-heartbeat {
+  0%, 100% {
+    box-shadow: 0 0 4px 1px hsl(142 71% 45% / 0.1);
+  }
+  50% {
+    box-shadow: 0 0 16px 4px hsl(142 71% 45% / 0.35);
+  }
+}
+
+@keyframes monitoring-node-glow {
+  0%, 100% {
+    box-shadow: 0 0 6px 1px hsl(142 71% 45% / 0.08), inset 0 0 4px 0 hsl(142 71% 45% / 0.04);
+  }
+  50% {
+    box-shadow: 0 0 20px 4px hsl(142 71% 45% / 0.25), inset 0 0 8px 0 hsl(142 71% 45% / 0.08);
+  }
+}
+
+@keyframes monitoring-node-glow-error {
+  0%, 100% {
+    box-shadow: 0 0 6px 1px hsl(0 72% 51% / 0.08), inset 0 0 4px 0 hsl(0 72% 51% / 0.04);
+  }
+  50% {
+    box-shadow: 0 0 18px 4px hsl(0 72% 51% / 0.2), inset 0 0 8px 0 hsl(0 72% 51% / 0.06);
+  }
+}
+
+.monitoring-heartbeat {
+  animation: monitoring-heartbeat 2.5s ease-in-out infinite;
+}
+
+.monitoring-node-glow {
+  animation: monitoring-node-glow 3s ease-in-out infinite;
+}
+
+.monitoring-node-glow-error {
+  animation: monitoring-node-glow-error 2s ease-in-out infinite;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
