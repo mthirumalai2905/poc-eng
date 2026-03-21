@@ -138,6 +138,7 @@ const Index = () => {
     try {
       await streamChat({
         messages: [...messages, userMsg],
+        conversationId: sessionId,
         onDelta: (chunk) => upsertAssistant(chunk),
         onStatus: (step) => setStatusSteps((prev) => [...prev, step]),
         onDone: async () => {
