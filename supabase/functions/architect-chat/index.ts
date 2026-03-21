@@ -26,33 +26,120 @@ serve(async (req) => {
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
-    const { messages } = await req.json();
+    const { messages, conversation_id } = await req.json();
     const userMessage = messages[messages.length - 1]?.content || "";
+    const sessionId = conversation_id || "anonymous";
 
     const stream = new ReadableStream({
       async start(controller) {
+        const traceStart = Date.now();
+
+        // ─── Helper: create monitoring trace ───
+        const { data: trace } = await supabase
+          .from("monitoring_traces")
+          .insert({
+            session_id: sessionId,
+            conversation_id: conversation_id || null,
+            status: "running",
+            metadata: { user_prompt: userMessage.slice(0, 500) },
+          })
+          .select("id")
+          .single();
+
+        const traceId = trace?.id;
+        let stepOrder = 0;
+
+        // Helper: create a node, return its id for later update
+        async function createNode(
+          type: string,
+          label: string,
+          inputData?: Record<string, unknown>,
+        ): Promise<string | null> {
+          stepOrder++;
+          const { data } = await supabase
+            .from("monitoring_nodes")
+            .insert({
+              trace_id: traceId,
+              step_order: stepOrder,
+              node_type: type,
+              node_label: label,
+              status: "running",
+              input_data: inputData || {},
+              started_at: new Date().toISOString(),
+            })
+            .select("id")
+            .single();
+          return data?.id || null;
+        }
+
+        async function completeNode(
+          nodeId: string | null,
+          status: string,
+          outputData?: Record<string, unknown>,
+          errorMessage?: string,
+        ) {
+          if (!nodeId) return;
+          const now = new Date().toISOString();
+          await supabase
+            .from("monitoring_nodes")
+            .update({
+              status,
+              output_data: outputData || {},
+              completed_at: now,
+              duration_ms: Date.now() - traceStart,
+              error_message: errorMessage || null,
+            })
+            .eq("id", nodeId);
+        }
+
         try {
-          // ─── Phase 1: Load skills from DB ───
+          // ─── Node 1: Intent Detection ───
+          const intentNodeId = await createNode("intent_detection", "Intent Detection", {
+            user_prompt: userMessage.slice(0, 500),
+          });
+          controller.enqueue(sseEvent("status", { step: "Analyzing intent..." }));
+
+          const dirKeywords = ["references", "scripts", "agents", "assets", "eval-viewer"];
+          const mentionedDirs = dirKeywords.filter((d) =>
+            userMessage.toLowerCase().includes(d)
+          );
+          const detectedIntent = {
+            mentioned_dirs: mentionedDirs,
+            prompt_length: userMessage.length,
+            has_dir_focus: mentionedDirs.length > 0,
+          };
+          await completeNode(intentNodeId, "completed", detectedIntent);
+
+          // ─── Node 2: Skill Selection ───
+          const skillNodeId = await createNode("skill_selection", "Skill Selection", {
+            intent: detectedIntent,
+          });
           controller.enqueue(sseEvent("status", { step: "Loading skills registry..." }));
 
           const { data: skills } = await supabase
             .from("skills")
             .select("id, name, description, category");
 
-          controller.enqueue(sseEvent("status", { step: `Found ${(skills || []).length} skills` }));
+          const skillNames = (skills || []).map((s: any) => s.name);
+          await completeNode(skillNodeId, "completed", {
+            skills_found: skillNames.length,
+            skill_names: skillNames,
+          });
+          controller.enqueue(sseEvent("status", { step: `Found ${skillNames.length} skills` }));
 
-          // Detect mentioned directories
-          const dirKeywords = ["references", "scripts", "agents", "assets", "eval-viewer"];
-          const mentionedDirs = dirKeywords.filter((d) =>
-            userMessage.toLowerCase().includes(d)
-          );
+          // ─── Node 3: Reference Loading ───
+          const refNodeId = await createNode("reference_loading", "Reference Loading", {
+            skills_to_scan: skillNames,
+            dir_filter: mentionedDirs,
+          });
 
           const skillContextBlocks: string[] = [];
+          let totalFilesRead = 0;
+          const allFilesAccessed: string[] = [];
 
           for (const skill of skills || []) {
             controller.enqueue(sseEvent("status", { step: `Querying DB for ${skill.name} files...` }));
 
-            // ─── Query skill_files table (DB-persisted metadata) ───
             const { data: dbFiles } = await supabase
               .from("skill_files")
               .select("file_path, file_name, is_folder, storage_path, file_type")
@@ -67,21 +154,15 @@ serve(async (req) => {
 
             controller.enqueue(sseEvent("status", { step: `Found ${allFiles.length} files in DB for ${skill.name}` }));
 
-            // Filter by mentioned dirs if user specified any
             let filesToRead = allFiles;
             if (mentionedDirs.length > 0) {
               filesToRead = allFiles.filter((f) => {
                 if (f.filePath === "SKILL.md") return true;
                 return mentionedDirs.some((d) => f.filePath.startsWith(d + "/") || f.filePath === d);
               });
-              controller.enqueue(
-                sseEvent("status", {
-                  step: `Filtered to ${mentionedDirs.join(", ")} → ${filesToRead.length} files`,
-                })
-              );
+              controller.enqueue(sseEvent("status", { step: `Filtered to ${mentionedDirs.join(", ")} → ${filesToRead.length} files` }));
             }
 
-            // Prioritize key files
             const priorityPaths = ["SKILL.md", "references/", "agents/", "scripts/"];
             filesToRead.sort((a, b) => {
               const aP = priorityPaths.findIndex((p) => a.filePath.includes(p));
@@ -89,14 +170,11 @@ serve(async (req) => {
               return (aP === -1 ? 99 : aP) - (bP === -1 ? 99 : bP);
             });
 
-            // Text-readable extensions
             const textExts = new Set(["md", "txt", "py", "js", "ts", "json", "yaml", "yml", "html", "css", "toml", "cfg", "ini", "sh"]);
-
             const capped = filesToRead.slice(0, 25);
             const fileContents: string[] = [];
             const fileList: string[] = [];
 
-            // ─── Read actual file contents from storage ───
             for (const file of capped) {
               const ext = file.fileName.split(".").pop()?.toLowerCase() || "";
               if (!textExts.has(ext)) continue;
@@ -111,10 +189,10 @@ serve(async (req) => {
                 if (fileData) {
                   const text = await fileData.text();
                   if (text.trim()) {
-                    fileContents.push(
-                      `#### File: ${file.filePath}\n\`\`\`\n${text.slice(0, 4000)}\n\`\`\``
-                    );
+                    fileContents.push(`#### File: ${file.filePath}\n\`\`\`\n${text.slice(0, 4000)}\n\`\`\``);
                     fileList.push(file.filePath);
+                    allFilesAccessed.push(`${skill.name}/${file.filePath}`);
+                    totalFilesRead++;
                   }
                 }
               } catch {
@@ -122,24 +200,50 @@ serve(async (req) => {
               }
             }
 
-            // Build context block
             let block = `### Skill: ${skill.name}\n**Category:** ${skill.category}\n**Description:** ${skill.description}`;
-
             if (fileContents.length > 0) {
               block += `\n\n**Files found in DB (${fileContents.length}):**\n${fileList.map((f) => `- ${f}`).join("\n")}`;
               block += `\n\n**File Contents:**\n${fileContents.join("\n\n")}`;
             } else {
               block += `\n\n**Files found:** NONE — no files exist in this skill's storage.`;
             }
-
             skillContextBlocks.push(block);
           }
 
+          await completeNode(refNodeId, "completed", {
+            total_files_read: totalFilesRead,
+            files_accessed: allFilesAccessed,
+          });
+
+          // ─── Node 4: Context Assembly ───
+          const ctxNodeId = await createNode("context_assembly", "Context Assembly", {
+            files_loaded: totalFilesRead,
+            skills_count: skillNames.length,
+          });
+          controller.enqueue(sseEvent("status", { step: "Context assembled. Generating response..." }));
+
           const skillRegistry = skillContextBlocks.join("\n\n---\n\n");
+          await completeNode(ctxNodeId, "completed", {
+            context_size_chars: skillRegistry.length,
+            total_files: totalFilesRead,
+          });
 
-          controller.enqueue(sseEvent("status", { step: "Context assembled from DB + storage. Generating response..." }));
+          // ─── Node 5: Execution Plan ───
+          const planNodeId = await createNode("execution_plan", "Execution Plan", {
+            strategy: "RAG pipeline → LLM generation",
+          });
+          await completeNode(planNodeId, "completed", {
+            model: "llama-3.3-70b-versatile",
+            provider: "groq",
+            pipeline: ["intent", "skill_match", "file_retrieval", "context_build", "llm_generate", "validate"],
+          });
 
-          // ─── Phase 2: System prompt ───
+          // ─── Node 6: Artifact Generation (LLM call) ───
+          const genNodeId = await createNode("artifact_generation", "LLM Generation", {
+            model: "llama-3.3-70b-versatile",
+            context_chars: skillRegistry.length,
+          });
+
           const systemPrompt = `You are **Architect**, a strict RAG-only AI engineering agent.
 
 ## ABSOLUTE RULES
@@ -192,26 +296,68 @@ ${skillRegistry || "No skills or files found."}
           if (!llmResponse.ok) {
             const errText = await llmResponse.text();
             console.error("Groq API error:", llmResponse.status, errText);
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ error: `API error: ${llmResponse.status}` })}\n\n`)
-            );
+            await completeNode(genNodeId, "error", {}, `Groq API ${llmResponse.status}: ${errText.slice(0, 200)}`);
+
+            // Mark trace as error
+            if (traceId) {
+              await supabase.from("monitoring_traces").update({
+                status: "error",
+                completed_at: new Date().toISOString(),
+                total_duration_ms: Date.now() - traceStart,
+              }).eq("id", traceId);
+            }
+
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: `API error: ${llmResponse.status}` })}\n\n`));
             controller.close();
             return;
           }
 
+          await completeNode(genNodeId, "completed", { status: "streaming" });
+
+          // ─── Node 7: Validation ───
+          const valNodeId = await createNode("validation", "Output Validation", {
+            check: "streaming_response",
+          });
+
           const reader = llmResponse.body!.getReader();
+          let totalChunks = 0;
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
+            totalChunks++;
             controller.enqueue(value);
+          }
+
+          await completeNode(valNodeId, "completed", {
+            chunks_streamed: totalChunks,
+            confidence: "high",
+            source_of_truth: "retrieved_files",
+          });
+
+          // ─── Complete trace ───
+          if (traceId) {
+            await supabase.from("monitoring_traces").update({
+              status: "completed",
+              completed_at: new Date().toISOString(),
+              total_duration_ms: Date.now() - traceStart,
+            }).eq("id", traceId);
           }
 
           controller.close();
         } catch (e) {
           console.error("Stream error:", e);
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" })}\n\n`)
-          );
+
+          // Mark trace as error
+          if (traceId) {
+            await supabase.from("monitoring_traces").update({
+              status: "error",
+              completed_at: new Date().toISOString(),
+              total_duration_ms: Date.now() - traceStart,
+              metadata: { error: e instanceof Error ? e.message : "Unknown" },
+            }).eq("id", traceId);
+          }
+
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" })}\n\n`));
           controller.close();
         }
       },

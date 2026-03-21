@@ -4,12 +4,14 @@ const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/architect-ch
 
 export async function streamChat({
   messages,
+  conversationId,
   onDelta,
   onDone,
   onError,
   onStatus,
 }: {
   messages: Msg[];
+  conversationId?: string | null;
   onDelta: (deltaText: string) => void;
   onDone: () => void;
   onError?: (error: string) => void;
@@ -21,7 +23,7 @@ export async function streamChat({
       "Content-Type": "application/json",
       Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
     },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, conversation_id: conversationId }),
   });
 
   if (resp.status === 429) {
@@ -56,14 +58,8 @@ export async function streamChat({
       if (line.endsWith("\r")) line = line.slice(0, -1);
       if (line.trim() === "") continue;
 
-      // Handle custom status events
-      if (line.startsWith("event: status")) {
-        // Next data line contains the status payload
-        continue;
-      }
-
+      if (line.startsWith("event: status")) continue;
       if (line.startsWith(":")) continue;
-
       if (!line.startsWith("data: ")) continue;
 
       const jsonStr = line.slice(6).trim();
@@ -75,24 +71,20 @@ export async function streamChat({
       try {
         const parsed = JSON.parse(jsonStr);
 
-        // Check if it's a status event
         if (parsed.step && typeof parsed.step === "string") {
           onStatus?.(parsed.step);
           continue;
         }
 
-        // Check for error
         if (parsed.error) {
           onError?.(parsed.error);
           streamDone = true;
           break;
         }
 
-        // Normal LLM delta
         const content = parsed.choices?.[0]?.delta?.content as string | undefined;
         if (content) onDelta(content);
       } catch {
-        // Might be incomplete JSON, put it back
         textBuffer = line + "\n" + textBuffer;
         break;
       }

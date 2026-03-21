@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Activity, CheckCircle2, Clock, AlertCircle, Loader2, RefreshCw, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
+import {
+  Activity, CheckCircle2, Clock, AlertCircle, Loader2, RefreshCw,
+  ChevronRight, ZoomIn, ZoomOut, X, FileText, Cpu, Search,
+  BookOpen, Layers, Zap, Shield, GitBranch,
+} from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 type Trace = {
@@ -29,28 +33,29 @@ type Node = {
   error_message: string | null;
 };
 
+const NODE_TYPE_ICONS: Record<string, typeof Activity> = {
+  intent_detection: Search,
+  skill_selection: BookOpen,
+  reference_loading: FileText,
+  context_assembly: Layers,
+  execution_plan: GitBranch,
+  artifact_generation: Cpu,
+  validation: Shield,
+  external_execution: Zap,
+};
+
 const statusColor = (status: string) => {
   switch (status) {
-    case "completed": return "hsl(var(--success))";
-    case "running": return "hsl(var(--foreground))";
-    case "error": return "hsl(var(--destructive))";
-    default: return "hsl(var(--muted-foreground))";
+    case "completed": return "var(--success)";
+    case "running": return "var(--foreground)";
+    case "error": return "var(--destructive)";
+    default: return "var(--muted-foreground)";
   }
 };
 
-const statusIcon = (status: string, size = "h-3.5 w-3.5") => {
-  switch (status) {
-    case "completed": return <CheckCircle2 className={`${size} text-success`} />;
-    case "running": return <Loader2 className={`${size} animate-spin text-foreground`} />;
-    case "error": return <AlertCircle className={`${size} text-destructive`} />;
-    default: return <Clock className={`${size} text-muted-foreground`} />;
-  }
-};
-
-const NODE_WIDTH = 220;
-const NODE_HEIGHT = 72;
-const GAP_X = 60;
-const GAP_Y = 24;
+const NODE_W = 200;
+const NODE_H = 80;
+const GAP = 56;
 
 export default function MonitoringCanvas() {
   const [traces, setTraces] = useState<Trace[]>([]);
@@ -63,6 +68,7 @@ export default function MonitoringCanvas() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const isPanning = useRef(false);
   const panStart = useRef({ x: 0, y: 0 });
+  const [searchTerm, setSearchTerm] = useState("");
 
   const fetchTraces = async () => {
     setLoading(true);
@@ -89,7 +95,22 @@ export default function MonitoringCanvas() {
     if (selectedTrace) {
       fetchNodes(selectedTrace);
       setSelectedNode(null);
+      setPan({ x: 40, y: 40 });
     }
+  }, [selectedTrace]);
+
+  // Realtime subscription for live updates
+  useEffect(() => {
+    const channel = supabase
+      .channel("monitoring-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "monitoring_traces" }, () => {
+        fetchTraces();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "monitoring_nodes" }, () => {
+        if (selectedTrace) fetchNodes(selectedTrace);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, [selectedTrace]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -98,100 +119,139 @@ export default function MonitoringCanvas() {
       panStart.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
     }
   }, [pan]);
-
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (isPanning.current) {
-      setPan({ x: e.clientX - panStart.current.x, y: e.clientY - panStart.current.y });
-    }
+    if (isPanning.current) setPan({ x: e.clientX - panStart.current.x, y: e.clientY - panStart.current.y });
   }, []);
-
   const handleMouseUp = useCallback(() => { isPanning.current = false; }, []);
 
-  // Group sessions by conversation_id
-  const groupedByConversation = traces.reduce<Record<string, Trace[]>>((acc, t) => {
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    setZoom(z => Math.min(2, Math.max(0.3, z - e.deltaY * 0.001)));
+  }, []);
+
+  // Group traces by conversation
+  const filteredTraces = searchTerm
+    ? traces.filter(t =>
+        t.id.includes(searchTerm) ||
+        t.session_id.includes(searchTerm) ||
+        (t.metadata?.user_prompt || "").toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    : traces;
+
+  const grouped = filteredTraces.reduce<Record<string, Trace[]>>((acc, t) => {
     const key = t.conversation_id || t.session_id;
     (acc[key] = acc[key] || []).push(t);
     return acc;
   }, {});
 
+  const selectedTraceData = traces.find(t => t.id === selectedTrace);
+
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="border-b border-border px-6 py-3 flex items-center justify-between flex-shrink-0">
+    <div className="flex flex-col h-full bg-background">
+      {/* Header bar */}
+      <div className="border-b border-border px-5 py-2.5 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
-          <Activity className="h-4 w-4 text-foreground" />
-          <h1 className="text-sm font-medium text-foreground tracking-tight">Monitoring</h1>
-          <span className="text-[10px] font-mono text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">
-            {traces.length} traces
-          </span>
+          <div className="h-7 w-7 rounded-md bg-foreground/5 border border-border flex items-center justify-center">
+            <Activity className="h-3.5 w-3.5 text-foreground" />
+          </div>
+          <div>
+            <h1 className="text-sm font-semibold text-foreground tracking-tight">Execution Monitor</h1>
+            <p className="text-[10px] text-muted-foreground">{traces.length} traces captured</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setZoom(z => Math.max(0.3, z - 0.15))} className="p-1.5 rounded hover:bg-accent transition-colors">
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => setZoom(z => Math.max(0.3, z - 0.15))} className="p-1.5 rounded-md hover:bg-accent transition-colors border border-transparent hover:border-border">
             <ZoomOut className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
-          <span className="text-[10px] font-mono text-muted-foreground w-10 text-center">{Math.round(zoom * 100)}%</span>
-          <button onClick={() => setZoom(z => Math.min(2, z + 0.15))} className="p-1.5 rounded hover:bg-accent transition-colors">
+          <span className="text-[10px] font-mono text-muted-foreground w-10 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
+          <button onClick={() => setZoom(z => Math.min(2, z + 0.15))} className="p-1.5 rounded-md hover:bg-accent transition-colors border border-transparent hover:border-border">
             <ZoomIn className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
-          <button onClick={fetchTraces} className="p-1.5 rounded hover:bg-accent transition-colors ml-2">
+          <div className="w-px h-4 bg-border mx-1" />
+          <button onClick={fetchTraces} className="p-1.5 rounded-md hover:bg-accent transition-colors border border-transparent hover:border-border">
             <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
         </div>
       </div>
 
       <div className="flex-1 flex min-h-0">
-        {/* Session/trace list */}
-        <div className="w-72 border-r border-border overflow-y-auto flex-shrink-0">
-          {loading ? (
-            <div className="flex items-center justify-center py-20">
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        {/* Trace list sidebar */}
+        <div className="w-72 border-r border-border flex flex-col flex-shrink-0">
+          {/* Search */}
+          <div className="p-2 border-b border-border">
+            <div className="flex items-center gap-2 bg-card border border-border rounded-md px-2.5 py-1.5">
+              <Search className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search traces..."
+                className="bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none flex-1"
+              />
             </div>
-          ) : Object.keys(groupedByConversation).length === 0 ? (
-            <div className="p-6 text-center">
-              <p className="text-xs text-muted-foreground">No traces yet.</p>
-              <p className="text-[10px] text-muted-foreground mt-1">Chat sessions will appear here.</p>
-            </div>
-          ) : (
-            Object.entries(groupedByConversation).map(([convId, convTraces]) => (
-              <div key={convId} className="border-b border-border">
-                <div className="px-3 py-2 bg-card/30">
-                  <span className="text-[10px] font-mono text-muted-foreground truncate block">
-                    Session: {convId.slice(0, 12)}…
-                  </span>
-                </div>
-                {convTraces.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => setSelectedTrace(t.id)}
-                    className={`w-full text-left px-4 py-2.5 hover:bg-accent transition-colors ${
-                      selectedTrace === t.id ? "bg-accent" : ""
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {statusIcon(t.status)}
-                        <span className="text-xs font-mono text-foreground truncate max-w-[120px]">
-                          Trace {t.id.slice(0, 8)}
-                        </span>
-                      </div>
-                      <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-muted-foreground">
-                        {new Date(t.created_at).toLocaleTimeString()}
-                      </span>
-                      {t.total_duration_ms && (
-                        <span className="text-[10px] font-mono text-muted-foreground">{t.total_duration_ms}ms</span>
-                      )}
-                    </div>
-                  </button>
-                ))}
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            {loading ? (
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               </div>
-            ))
-          )}
+            ) : Object.keys(grouped).length === 0 ? (
+              <div className="p-6 text-center">
+                <Activity className="h-6 w-6 text-muted-foreground/20 mx-auto mb-2" />
+                <p className="text-xs text-muted-foreground">No traces yet</p>
+                <p className="text-[10px] text-muted-foreground mt-1">Send a chat message to generate traces</p>
+              </div>
+            ) : (
+              Object.entries(grouped).map(([convId, convTraces]) => (
+                <div key={convId} className="border-b border-border/50">
+                  <div className="px-3 py-1.5 bg-card/20 sticky top-0">
+                    <span className="text-[10px] font-mono text-muted-foreground/70 truncate block">
+                      {convId.slice(0, 16)}…
+                    </span>
+                  </div>
+                  {convTraces.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setSelectedTrace(t.id)}
+                      className={`w-full text-left px-3 py-2.5 transition-colors border-l-2 ${
+                        selectedTrace === t.id
+                          ? "bg-accent border-l-foreground"
+                          : "border-l-transparent hover:bg-accent/50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <StatusDot status={t.status} />
+                          <span className="text-[11px] font-mono text-foreground">
+                            {t.id.slice(0, 8)}
+                          </span>
+                        </div>
+                        <ChevronRight className="h-3 w-3 text-muted-foreground/40" />
+                      </div>
+                      {t.metadata?.user_prompt && (
+                        <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                          {(t.metadata.user_prompt as string).slice(0, 50)}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[9px] text-muted-foreground/60">
+                          {new Date(t.created_at).toLocaleTimeString()}
+                        </span>
+                        {t.total_duration_ms != null && (
+                          <span className="text-[9px] font-mono text-muted-foreground/60 bg-secondary px-1 rounded">
+                            {t.total_duration_ms}ms
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ))
+            )}
+          </div>
         </div>
 
-        {/* Canvas area */}
+        {/* Canvas */}
         <div className="flex-1 flex min-w-0">
           <div
             ref={canvasRef}
@@ -200,8 +260,9 @@ export default function MonitoringCanvas() {
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
+            onWheel={handleWheel}
           >
-            {/* Grid background */}
+            {/* Dot grid */}
             <div className="absolute inset-0 canvas-bg" style={{
               backgroundImage: "radial-gradient(circle, hsl(var(--border)) 1px, transparent 1px)",
               backgroundSize: `${20 * zoom}px ${20 * zoom}px`,
@@ -210,132 +271,201 @@ export default function MonitoringCanvas() {
 
             {!selectedTrace ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <Activity className="h-10 w-10 text-muted-foreground/20 mb-3" />
-                <p className="text-xs text-muted-foreground">Select a trace to view execution graph</p>
+                <div className="h-16 w-16 rounded-2xl border border-dashed border-border flex items-center justify-center mb-4">
+                  <Activity className="h-6 w-6 text-muted-foreground/15" />
+                </div>
+                <p className="text-xs text-muted-foreground">Select a trace to visualize execution graph</p>
+                <p className="text-[10px] text-muted-foreground/50 mt-1">Each node represents an AI reasoning step</p>
               </div>
             ) : (
-              <div
-                className="absolute"
-                style={{
-                  transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                  transformOrigin: "0 0",
-                }}
-              >
-                {/* SVG connectors */}
-                <svg
-                  className="absolute top-0 left-0 pointer-events-none"
-                  width={nodes.length * (NODE_WIDTH + GAP_X)}
-                  height={NODE_HEIGHT + GAP_Y * 2}
-                  style={{ overflow: "visible" }}
-                >
-                  {nodes.map((node, idx) => {
-                    if (idx === 0) return null;
-                    const x1 = (idx - 1) * (NODE_WIDTH + GAP_X) + NODE_WIDTH;
-                    const y1 = NODE_HEIGHT / 2;
-                    const x2 = idx * (NODE_WIDTH + GAP_X);
-                    const y2 = NODE_HEIGHT / 2;
-                    const midX = (x1 + x2) / 2;
-                    return (
-                      <path
-                        key={`conn-${idx}`}
-                        d={`M${x1},${y1} C${midX},${y1} ${midX},${y2} ${x2},${y2}`}
-                        stroke={statusColor(node.status)}
-                        strokeWidth={2}
-                        fill="none"
-                        strokeDasharray={node.status === "running" ? "6 3" : undefined}
-                        opacity={0.5}
-                      />
-                    );
-                  })}
-                </svg>
+              <>
+                {/* Prompt banner */}
+                {selectedTraceData?.metadata?.user_prompt && (
+                  <div className="absolute top-3 left-3 right-3 z-10">
+                    <div className="bg-card/90 backdrop-blur-sm border border-border rounded-lg px-3 py-2 max-w-lg">
+                      <p className="text-[10px] font-medium text-muted-foreground mb-0.5">User Prompt</p>
+                      <p className="text-xs text-foreground truncate">{selectedTraceData.metadata.user_prompt}</p>
+                    </div>
+                  </div>
+                )}
 
-                {/* Node cards */}
-                <AnimatePresence>
-                  {nodes.map((node, idx) => (
-                    <motion.div
-                      key={node.id}
-                      initial={{ opacity: 0, scale: 0.85 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: idx * 0.08, type: "spring", damping: 20 }}
-                      className={`absolute rounded-lg border bg-card p-3 cursor-pointer transition-shadow hover:shadow-md ${
-                        selectedNode?.id === node.id ? "border-foreground/40 shadow-lg ring-1 ring-foreground/10" : "border-border"
-                      } ${
-                        node.status === "error" ? "border-destructive/40 bg-destructive/5" :
-                        node.status === "running" ? "border-foreground/20" : ""
-                      }`}
-                      style={{
-                        left: idx * (NODE_WIDTH + GAP_X),
-                        top: 0,
-                        width: NODE_WIDTH,
-                        height: NODE_HEIGHT,
-                      }}
-                      onClick={(e) => { e.stopPropagation(); setSelectedNode(node); }}
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-[11px] font-medium text-foreground truncate">{node.node_label}</span>
-                        {statusIcon(node.status, "h-3 w-3")}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-mono text-muted-foreground bg-secondary px-1.5 py-0.5 rounded">{node.node_type}</span>
-                        {node.duration_ms && <span className="text-[10px] font-mono text-muted-foreground">{node.duration_ms}ms</span>}
-                      </div>
-                      {node.error_message && (
-                        <p className="text-[9px] text-destructive mt-1 truncate">{node.error_message}</p>
-                      )}
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
+                <div
+                  className="absolute"
+                  style={{
+                    transform: `translate(${pan.x}px, ${pan.y + 60}px) scale(${zoom})`,
+                    transformOrigin: "0 0",
+                  }}
+                >
+                  {/* SVG connectors */}
+                  <svg
+                    className="absolute top-0 left-0 pointer-events-none"
+                    width={(nodes.length + 1) * (NODE_W + GAP)}
+                    height={NODE_H + 100}
+                    style={{ overflow: "visible" }}
+                  >
+                    {nodes.map((node, idx) => {
+                      if (idx === 0) return null;
+                      const x1 = (idx - 1) * (NODE_W + GAP) + NODE_W;
+                      const y1 = NODE_H / 2;
+                      const x2 = idx * (NODE_W + GAP);
+                      const y2 = NODE_H / 2;
+                      const midX = (x1 + x2) / 2;
+                      const isError = node.status === "error";
+                      return (
+                        <g key={`conn-${idx}`}>
+                          <path
+                            d={`M${x1},${y1} C${midX},${y1} ${midX},${y2} ${x2},${y2}`}
+                            stroke={isError ? "hsl(var(--destructive))" : node.status === "completed" ? "hsl(var(--success))" : "hsl(var(--border))"}
+                            strokeWidth={2}
+                            fill="none"
+                            strokeDasharray={node.status === "running" ? "6 3" : undefined}
+                            opacity={0.6}
+                          />
+                          {/* Arrow head */}
+                          <circle cx={x2} cy={y2} r={3} fill={isError ? "hsl(var(--destructive))" : node.status === "completed" ? "hsl(var(--success))" : "hsl(var(--border))"} opacity={0.6} />
+                        </g>
+                      );
+                    })}
+                  </svg>
+
+                  {/* Node cards */}
+                  <AnimatePresence>
+                    {nodes.map((node, idx) => {
+                      const Icon = NODE_TYPE_ICONS[node.node_type] || Cpu;
+                      const isActive = selectedNode?.id === node.id;
+                      const isError = node.status === "error";
+                      const isRunning = node.status === "running";
+                      const isCompleted = node.status === "completed";
+
+                      return (
+                        <motion.div
+                          key={node.id}
+                          initial={{ opacity: 0, y: 12 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: idx * 0.06, type: "spring", damping: 22 }}
+                          className={`absolute rounded-xl border bg-card cursor-pointer transition-all duration-150 ${
+                            isActive ? "border-foreground/30 shadow-lg shadow-foreground/5 ring-1 ring-foreground/10" : "border-border hover:border-muted-foreground/30 hover:shadow-md"
+                          } ${
+                            isError ? "border-destructive/30 bg-destructive/5" :
+                            isRunning ? "border-foreground/20 shadow-sm shadow-foreground/5" : ""
+                          }`}
+                          style={{
+                            left: idx * (NODE_W + GAP),
+                            top: 0,
+                            width: NODE_W,
+                            height: NODE_H,
+                          }}
+                          onClick={(e) => { e.stopPropagation(); setSelectedNode(node); }}
+                        >
+                          <div className="p-3 h-full flex flex-col justify-between">
+                            <div className="flex items-start justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className={`h-6 w-6 rounded-md flex items-center justify-center ${
+                                  isCompleted ? "bg-success/10" : isError ? "bg-destructive/10" : isRunning ? "bg-foreground/10" : "bg-muted"
+                                }`}>
+                                  {isRunning ? (
+                                    <Loader2 className="h-3 w-3 animate-spin text-foreground" />
+                                  ) : (
+                                    <Icon className={`h-3 w-3 ${isCompleted ? "text-success" : isError ? "text-destructive" : "text-muted-foreground"}`} />
+                                  )}
+                                </div>
+                                <span className="text-[11px] font-medium text-foreground truncate max-w-[110px]">
+                                  {node.node_label}
+                                </span>
+                              </div>
+                              <StatusDot status={node.status} />
+                            </div>
+                            <div className="flex items-center justify-between mt-auto">
+                              <span className="text-[9px] font-mono text-muted-foreground/60 bg-secondary px-1.5 py-0.5 rounded">
+                                {node.node_type}
+                              </span>
+                              {node.duration_ms != null && (
+                                <span className="text-[9px] font-mono text-muted-foreground/60">{node.duration_ms}ms</span>
+                              )}
+                            </div>
+                          </div>
+                          {isError && node.error_message && (
+                            <div className="absolute -bottom-6 left-0 right-0 text-center">
+                              <span className="text-[8px] text-destructive bg-destructive/10 px-2 py-0.5 rounded-full">
+                                {node.error_message.slice(0, 40)}…
+                              </span>
+                            </div>
+                          )}
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
+                </div>
+              </>
             )}
           </div>
 
-          {/* Node detail panel */}
+          {/* Detail panel */}
           <AnimatePresence>
             {selectedNode && (
               <motion.div
                 initial={{ width: 0, opacity: 0 }}
-                animate={{ width: 320, opacity: 1 }}
+                animate={{ width: 340, opacity: 1 }}
                 exit={{ width: 0, opacity: 0 }}
                 transition={{ type: "spring", damping: 25 }}
-                className="border-l border-border overflow-y-auto flex-shrink-0 bg-card/50"
+                className="border-l border-border overflow-hidden flex-shrink-0 bg-card/50 backdrop-blur-sm"
               >
-                <div className="p-4 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-semibold text-foreground">{selectedNode.node_label}</h3>
-                    {statusIcon(selectedNode.status)}
-                  </div>
+                <div className="h-full overflow-y-auto">
+                  <div className="p-4 space-y-4">
+                    {/* Header */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {(() => {
+                          const Icon = NODE_TYPE_ICONS[selectedNode.node_type] || Cpu;
+                          return <Icon className="h-4 w-4 text-foreground" />;
+                        })()}
+                        <h3 className="text-xs font-semibold text-foreground">{selectedNode.node_label}</h3>
+                      </div>
+                      <button onClick={() => setSelectedNode(null)} className="p-1 rounded hover:bg-accent transition-colors">
+                        <X className="h-3 w-3 text-muted-foreground" />
+                      </button>
+                    </div>
 
-                  <div className="space-y-2">
-                    <DetailRow label="Type" value={selectedNode.node_type} />
-                    <DetailRow label="Status" value={selectedNode.status} />
-                    <DetailRow label="Step" value={String(selectedNode.step_order)} />
-                    {selectedNode.duration_ms && <DetailRow label="Duration" value={`${selectedNode.duration_ms}ms`} />}
-                    {selectedNode.started_at && <DetailRow label="Started" value={new Date(selectedNode.started_at).toLocaleTimeString()} />}
+                    {/* Status badge */}
+                    <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium ${
+                      selectedNode.status === "completed" ? "bg-success/10 text-success" :
+                      selectedNode.status === "error" ? "bg-destructive/10 text-destructive" :
+                      selectedNode.status === "running" ? "bg-foreground/10 text-foreground" :
+                      "bg-muted text-muted-foreground"
+                    }`}>
+                      <StatusDot status={selectedNode.status} />
+                      {selectedNode.status}
+                    </div>
+
+                    {/* Metadata grid */}
+                    <div className="space-y-1.5">
+                      <DetailRow label="Type" value={selectedNode.node_type} />
+                      <DetailRow label="Step" value={`#${selectedNode.step_order}`} />
+                      {selectedNode.duration_ms != null && <DetailRow label="Duration" value={`${selectedNode.duration_ms}ms`} />}
+                      {selectedNode.started_at && <DetailRow label="Started" value={new Date(selectedNode.started_at).toLocaleTimeString()} />}
+                      {selectedNode.completed_at && <DetailRow label="Completed" value={new Date(selectedNode.completed_at).toLocaleTimeString()} />}
+                    </div>
+
+                    {/* Error */}
                     {selectedNode.error_message && (
                       <div>
-                        <span className="text-[10px] text-destructive font-medium">Error</span>
-                        <p className="text-[10px] font-mono text-destructive/80 mt-0.5 bg-destructive/5 p-2 rounded">{selectedNode.error_message}</p>
+                        <span className="text-[10px] font-medium text-destructive uppercase tracking-wider">Error</span>
+                        <div className="mt-1 bg-destructive/5 border border-destructive/20 rounded-md p-2">
+                          <p className="text-[10px] font-mono text-destructive/80 break-all">{selectedNode.error_message}</p>
+                        </div>
                       </div>
                     )}
+
+                    {/* Input data */}
+                    {selectedNode.input_data && Object.keys(selectedNode.input_data).length > 0 && (
+                      <CollapsibleJson title="Input Data" data={selectedNode.input_data} />
+                    )}
+
+                    {/* Output data */}
+                    {selectedNode.output_data && Object.keys(selectedNode.output_data).length > 0 && (
+                      <CollapsibleJson title="Output Data" data={selectedNode.output_data} />
+                    )}
                   </div>
-
-                  {selectedNode.input_data && Object.keys(selectedNode.input_data).length > 0 && (
-                    <div>
-                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Input</span>
-                      <pre className="text-[10px] font-mono text-muted-foreground mt-1 bg-secondary p-2 rounded overflow-x-auto max-h-32">
-                        {JSON.stringify(selectedNode.input_data, null, 2)}
-                      </pre>
-                    </div>
-                  )}
-
-                  {selectedNode.output_data && Object.keys(selectedNode.output_data).length > 0 && (
-                    <div>
-                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Output</span>
-                      <pre className="text-[10px] font-mono text-muted-foreground mt-1 bg-secondary p-2 rounded overflow-x-auto max-h-40">
-                        {JSON.stringify(selectedNode.output_data, null, 2)}
-                      </pre>
-                    </div>
-                  )}
                 </div>
               </motion.div>
             )}
@@ -346,11 +476,49 @@ export default function MonitoringCanvas() {
   );
 }
 
+function StatusDot({ status }: { status: string }) {
+  return (
+    <span className={`inline-block h-2 w-2 rounded-full ${
+      status === "completed" ? "bg-success" :
+      status === "error" ? "bg-destructive" :
+      status === "running" ? "bg-foreground animate-pulse" :
+      "bg-muted-foreground/30"
+    }`} />
+  );
+}
+
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between py-1 border-b border-border/30">
       <span className="text-[10px] text-muted-foreground">{label}</span>
       <span className="text-[10px] font-mono text-foreground">{value}</span>
+    </div>
+  );
+}
+
+function CollapsibleJson({ title, data }: { title: string; data: any }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors flex items-center gap-1"
+      >
+        <ChevronRight className={`h-2.5 w-2.5 transition-transform ${open ? "rotate-90" : ""}`} />
+        {title}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.pre
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="text-[10px] font-mono text-muted-foreground mt-1 bg-secondary/50 border border-border/30 p-2 rounded-md overflow-x-auto max-h-48 overflow-y-auto"
+          >
+            {JSON.stringify(data, null, 2)}
+          </motion.pre>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
